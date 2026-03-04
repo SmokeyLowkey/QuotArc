@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, MapPin, FileText, Zap, Pencil, X, Check, Users } from 'lucide-react'
+import { Search, MapPin, FileText, Zap, Pencil, X, Check, Users, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { useCustomers } from '@/hooks/use-customers'
 import { PaginationControls } from '@/components/ui/pagination-controls'
@@ -37,11 +37,13 @@ function toForm(c: Customer): EditForm {
 }
 
 export default function CustomersPage() {
-  const { customers, loading, page, setPage, search, setSearch, pagination, updateCustomer } = useCustomers()
+  const { customers, loading, page, setPage, search, setSearch, pagination, updateCustomer, deleteCustomer } = useCustomers()
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<EditForm | null>(null)
   const [saving, setSaving] = useState(false)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   // On mobile we keep accordion expand; on desktop we drive the right panel
   const [expandedMobile, setExpandedMobile] = useState<string | null>(null)
@@ -81,6 +83,14 @@ export default function CustomersPage() {
     })
     setSaving(false)
     cancelEdit()
+  }
+
+  async function handleDelete(id: string) {
+    setDeleting(true)
+    const ok = await deleteCustomer(id)
+    setDeleting(false)
+    setConfirmDeleteId(null)
+    if (ok && selectedId === id) setSelectedId(null)
   }
 
   function field(key: keyof EditForm, value: string) {
@@ -171,6 +181,11 @@ export default function CustomersPage() {
             <DetailPanel
               customer={selectedCustomer}
               onEdit={() => startEdit(selectedCustomer)}
+              confirmDelete={confirmDeleteId === selectedCustomer.id}
+              deleting={deleting}
+              onDeleteRequest={() => setConfirmDeleteId(selectedCustomer.id)}
+              onDeleteConfirm={() => handleDelete(selectedCustomer.id)}
+              onDeleteCancel={() => setConfirmDeleteId(null)}
             />
           )}
         </div>
@@ -209,7 +224,16 @@ export default function CustomersPage() {
 
               {expandedMobile === customer.id && editingId !== customer.id && (
                 <div className="border-t border-sf-border px-3 py-3">
-                  <DetailPanel customer={customer} onEdit={() => { startEdit(customer); setEditingId(customer.id) }} compact />
+                  <DetailPanel
+                    customer={customer}
+                    onEdit={() => { startEdit(customer); setEditingId(customer.id) }}
+                    compact
+                    confirmDelete={confirmDeleteId === customer.id}
+                    deleting={deleting}
+                    onDeleteRequest={() => setConfirmDeleteId(customer.id)}
+                    onDeleteConfirm={() => handleDelete(customer.id)}
+                    onDeleteCancel={() => setConfirmDeleteId(null)}
+                  />
                 </div>
               )}
 
@@ -237,7 +261,25 @@ export default function CustomersPage() {
 
 // ─── Detail Panel ──────────────────────────────────────────────────────────────
 
-function DetailPanel({ customer, onEdit, compact }: { customer: Customer; onEdit: () => void; compact?: boolean }) {
+function DetailPanel({
+  customer,
+  onEdit,
+  compact,
+  confirmDelete,
+  deleting,
+  onDeleteRequest,
+  onDeleteConfirm,
+  onDeleteCancel,
+}: {
+  customer: Customer
+  onEdit: () => void
+  compact?: boolean
+  confirmDelete: boolean
+  deleting: boolean
+  onDeleteRequest: () => void
+  onDeleteConfirm: () => void
+  onDeleteCancel: () => void
+}) {
   return (
     <div className="p-4 space-y-4">
       {/* Name */}
@@ -310,6 +352,33 @@ function DetailPanel({ customer, onEdit, compact }: { customer: Customer; onEdit
           <Pencil size={12} strokeWidth={1.5} className="mr-1" />
           Edit
         </button>
+        {!confirmDelete ? (
+          <button
+            onClick={onDeleteRequest}
+            className="btn-press inline-flex items-center h-7 px-2.5 rounded-[4px] border border-red-300 text-[11px] font-medium text-red-500 hover:bg-red-50 transition-colors ml-auto"
+          >
+            <Trash2 size={12} strokeWidth={1.5} className="mr-1" />
+            Delete
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5 ml-auto">
+            <span className="text-[11px] text-red-500 font-medium">Delete customer and all related data?</span>
+            <button
+              onClick={onDeleteConfirm}
+              disabled={deleting}
+              className="btn-press inline-flex items-center h-7 px-2.5 rounded-[4px] bg-red-500 text-[11px] font-medium text-white disabled:opacity-50 transition-opacity"
+            >
+              {deleting ? 'Deleting...' : 'Confirm'}
+            </button>
+            <button
+              onClick={onDeleteCancel}
+              disabled={deleting}
+              className="btn-press inline-flex items-center h-7 px-2.5 rounded-[4px] border border-sf-border text-[11px] font-medium text-sf-text-secondary hover:bg-sf-surface-2 transition-colors"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

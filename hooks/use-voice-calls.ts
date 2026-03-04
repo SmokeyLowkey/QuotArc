@@ -16,10 +16,13 @@ const POLL_INTERVAL = 30_000 // 30s — refetch from our DB
 const SYNC_INTERVAL = 60_000 // 60s — backfill from Vapi API
 const DEFAULT_LIMIT = 20
 
+export type DateRange = '7' | '30' | '90' | '0'
+
 export function useVoiceCalls(initialFilter: LeadFilter = 'all') {
   const [calls, setCalls] = useState<EnrichedVoiceCall[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilterRaw] = useState<LeadFilter>(initialFilter)
+  const [days, setDaysRaw] = useState<DateRange>('30')
   const [page, setPage] = useState(1)
   const [pagination, setPagination] = useState<PaginationMeta | null>(null)
   const supabase = createClient()
@@ -30,9 +33,14 @@ export function useVoiceCalls(initialFilter: LeadFilter = 'all') {
     setPage(1)
   }, [])
 
+  const setDays = useCallback((d: DateRange) => {
+    setDaysRaw(d)
+    setPage(1)
+  }, [])
+
   const fetchCalls = useCallback(async () => {
     try {
-      const params = new URLSearchParams({ page: String(page), limit: String(DEFAULT_LIMIT) })
+      const params = new URLSearchParams({ page: String(page), limit: String(DEFAULT_LIMIT), days })
       if (filter !== 'all') params.set('filter', filter)
       const res = await fetch(`/api/voice/calls?${params}`)
       if (res.ok) {
@@ -44,7 +52,7 @@ export function useVoiceCalls(initialFilter: LeadFilter = 'all') {
       // Silently fail
     }
     setLoading(false)
-  }, [filter, page])
+  }, [filter, days, page])
 
   // Backfill calls from Vapi API that webhooks may have missed
   const syncFromVapi = useCallback(async () => {
@@ -95,5 +103,5 @@ export function useVoiceCalls(initialFilter: LeadFilter = 'all') {
     }
   }, [supabase, fetchCalls, syncFromVapi])
 
-  return { calls, loading, filter, setFilter, page, setPage, pagination, refetch: fetchCalls }
+  return { calls, loading, filter, setFilter, days, setDays, page, setPage, pagination, refetch: fetchCalls }
 }

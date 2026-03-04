@@ -23,6 +23,7 @@ import {
   filterSlotsByPreference,
   formatSlotsForSpeech,
 } from '@/lib/voice/scheduling'
+import { normalizePhone, phonesMatch } from '@/lib/voice/phone'
 
 export const dynamic = 'force-dynamic'
 
@@ -171,19 +172,29 @@ ${profile.receptionist_transfer_number ? 'Transfer to the owner is available if 
 ${profile.receptionist_instructions ? `\nSPECIAL INSTRUCTIONS (FOLLOW STRICTLY):\n${profile.receptionist_instructions}\n` : ''}${recognized ? `\nCALLER CONTEXT (use to personalize — don't recite it all):\n${recognized.contextSummary}\n- Greet by first name. If they have an open quote or upcoming job, ask if that's why they're calling.\n` : ''}${closedToday ? `
 DAY OFF TODAY (${todayStr}): The owner is unavailable today (one-time exception). Do NOT check availability or schedule appointments. Instead: use capture_lead to save the caller's name and phone number, set notes to "Follow-up needed: called on day off", and let them know someone will call back soon.` : ''}
 
+CRITICAL RULES:
+- ALWAYS call capture_lead as soon as you have the caller's name and phone — even if they're not scheduling. Every caller must be saved.
+- NEVER say "I don't have access to appointments" — use lookup_customer_jobs to find their existing bookings.
+- NEVER make up appointment times — ALWAYS use check_availability first.
+- If a tool fails or you truly can't help, offer to transfer (if available) or take a message for a callback.
+
 CALL FLOW:
 1. Listen to their need, give a SHORT answer with pricing if relevant
-2. Ask if they'd like to schedule an appointment or leave their info for a callback
-3. Collect their info: name, best callback number, street address, and city — ask naturally, one at a time
-4. If scheduling: use check_availability to find real openings FIRST — NEVER make up times
-5. After checking availability, let them pick a slot, then use schedule_appointment to book it
-6. Use capture_lead to save their name, phone, address, city, and job type
-7. Once done, confirm what was discussed and wrap up
+2. Collect their info naturally: name, best callback number, street address, and city — one question at a time
+3. Call capture_lead to save their info AS SOON as you have name + phone (don't wait until the end)
+4. If scheduling: use check_availability to find REAL openings, let them pick, then schedule_appointment
+5. If cancelling/rescheduling: use lookup_customer_jobs to find their appointment, then help accordingly
+6. Confirm details and wrap up
 
 SCHEDULING RULES:
 - ALWAYS use check_availability before suggesting any times — never guess or make up availability
 - ALWAYS use capture_lead before schedule_appointment
 - Today's date is ${new Date().toISOString().split('T')[0]}
+
+CANCELLATION / RESCHEDULING:
+- If the caller wants to cancel or reschedule, use lookup_customer_jobs with their name or phone to find their appointments
+- Confirm which appointment they mean
+- You cannot directly cancel or modify — note the request via capture_lead (set notes to the cancellation/reschedule details) and let them know the owner will confirm
 
 ENDING THE CALL:
 - NEVER end the call abruptly. Always confirm what was discussed first.
@@ -284,6 +295,20 @@ ENDING THE CALL:
             },
           },
         },
+        {
+          type: 'function',
+          function: {
+            name: 'lookup_customer_jobs',
+            description: 'Look up existing appointments for a customer by name or phone number. Use when caller asks about cancelling, rescheduling, or checking an existing appointment.',
+            parameters: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Customer name to search for' },
+                phone: { type: 'string', description: 'Customer phone number to search for' },
+              },
+            },
+          },
+        },
       ],
     },
   })
@@ -342,13 +367,27 @@ async function handleToolCalls(message: Record<string, unknown>) {
         break
       }
       case 'transfer_call': {
+        if (transferNumber) {
+          results.push({ toolCallId: tc.id, result: 'Transferring now' })
+          // Return Vapi destination at the response level to trigger actual SIP transfer
+          return NextResponse.json({
+            results,
+            destination: {
+              type: 'number',
+              number: transferNumber,
+              message: 'Please hold while I transfer you.',
+            },
+          })
+        }
         results.push({
           toolCallId: tc.id,
-          result: JSON.stringify({
-            destination: transferNumber || null,
-            message: transferNumber ? 'Transferring now' : 'Transfer not available',
-          }),
+          result: JSON.stringify({ message: 'Transfer not available — take a message instead.' }),
         })
+        break
+      }
+      case 'lookup_customer_jobs': {
+        const result = await toolLookupCustomerJobs(userId, args)
+        results.push({ toolCallId: tc.id, result: JSON.stringify(result) })
         break
       }
       default:
@@ -641,6 +680,103 @@ async function toolScheduleAppointment(
   return {
     success: true,
     message: `I've scheduled your ${jobType} appointment for ${dateDisplay}${timeDisplay}. We'll see you then!`,
+  }
+}
+
+// ─── Tool: Lookup Customer Jobs ─────────────────────────────────
+
+async function toolLookupCustomerJobs(
+  userId: string | undefined,
+  args: Record<string, unknown>,
+) {
+  if (!userId) return { success: false, message: 'Unable to look up appointments right now.' }
+
+  const name = args.name as string | undefined
+  const phone = args.phone as string | undefined
+
+  if (!name && !phone) {
+    return { success: false, message: "I need a name or phone number to look up appointments." }
+  }
+
+  const customerIds: string[] = []
+
+  // Name-based search (case-insensitive)
+  if (name) {
+    const byName = await prisma.customer.findMany({
+      where: {
+        user_id: userId,
+        name: { contains: name, mode: 'insensitive' },
+      },
+      select: { id: true },
+      take: 5,
+    })
+    customerIds.push(...byName.map(c => c.id))
+  }
+
+  // Phone-based search (normalize and compare)
+  if (phone && normalizePhone(phone)) {
+    const withPhone = await prisma.customer.findMany({
+      where: {
+        user_id: userId,
+        phone: { not: null },
+      },
+      select: { id: true, phone: true },
+    })
+    for (const c of withPhone) {
+      if (c.phone && phonesMatch(phone, c.phone)) {
+        customerIds.push(c.id)
+      }
+    }
+  }
+
+  const uniqueIds = [...new Set(customerIds)]
+
+  if (uniqueIds.length === 0) {
+    return {
+      success: false,
+      message: "I couldn't find any customer records with that information. Let me take your details and have someone call you back.",
+    }
+  }
+
+  // Fetch upcoming jobs for matched customers
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+
+  const jobs = await prisma.job.findMany({
+    where: {
+      user_id: userId,
+      customer_id: { in: uniqueIds },
+      status: { in: ['scheduled', 'in_progress'] },
+      scheduled_date: { gte: today },
+    },
+    select: {
+      job_type: true,
+      status: true,
+      scheduled_date: true,
+      start_time: true,
+    },
+    orderBy: { scheduled_date: 'asc' },
+    take: 5,
+  })
+
+  if (jobs.length === 0) {
+    return {
+      success: true,
+      jobs: [],
+      message: "I found the customer but they don't have any upcoming appointments.",
+    }
+  }
+
+  const jobList = jobs.map(j => {
+    const date = j.scheduled_date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+    const time = j.start_time ? ` at ${formatTimeForSpeech(j.start_time)}` : ''
+    return `${j.job_type} on ${date}${time} (${j.status === 'in_progress' ? 'in progress' : j.status})`
+  })
+
+  return {
+    success: true,
+    jobs: jobList,
+    message: `Found ${jobs.length} upcoming appointment${jobs.length !== 1 ? 's' : ''}: ${jobList.join('; ')}`,
   }
 }
 

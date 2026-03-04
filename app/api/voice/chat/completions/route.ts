@@ -15,6 +15,7 @@
 import { NextRequest } from 'next/server'
 import { redis } from '@/lib/redis'
 import { prisma } from '@/lib/prisma'
+import { recognizeCallerByPhone } from '@/lib/voice/customer-recognition'
 import { ChatOpenAI } from '@langchain/openai'
 import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
 import type { BaseMessage } from '@langchain/core/messages'
@@ -97,10 +98,11 @@ export async function POST(request: NextRequest) {
       (metadata?.hours as typeof hours) ?? {}
     let transferNumber: string | null = (metadata?.transfer_number as string) ?? null
     let instructions: string | null = (metadata?.instructions as string) ?? null
-    const recognizedCustomer = metadata?.recognized_customer as { id: string; name: string; contextSummary: string } | null | undefined
+    let recognizedCustomer = metadata?.recognized_customer as { id: string; name: string; contextSummary: string } | null | undefined
     let userId = (metadata?.user_id as string) ?? ''
+    const callerNumber = (body.call?.customer as Record<string, unknown>)?.number as string | undefined
 
-    // If no metadata, look up by phoneNumberId (fallback for direct calls)
+    // If no metadata, look up by phoneNumberId (fallback for direct calls / static assistant)
     if (!userId && phoneNumberId) {
       const profile = await prisma.profile.findFirst({
         where: { vapi_phone_number_id: phoneNumberId },
@@ -139,6 +141,11 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Run caller recognition if not already set by assistant-request
+    if (!recognizedCustomer && userId && callerNumber) {
+      recognizedCustomer = await recognizeCallerByPhone(userId, callerNumber)
+    }
+
     if (!userId) {
       console.warn(`[voice-chat] No profile found for phoneNumberId: ${phoneNumberId}`)
       console.warn(`[voice-chat] call metadata: ${JSON.stringify(metadata ?? null)}`)
@@ -161,7 +168,13 @@ export async function POST(request: NextRequest) {
     const isGreeting = GREETING_PATTERNS.test(lastUserMessage.trim())
 
     if (isFirstTurn && isGreeting) {
-      const greeting = `Hi there! Thanks for calling ${companyName}. How can I help you today?`
+      let greeting: string
+      if (recognizedCustomer) {
+        const firstName = recognizedCustomer.name.split(' ')[0]
+        greeting = `Hi ${firstName}, thanks for calling ${companyName}. How can I help you today?`
+      } else {
+        greeting = `Hi there! Thanks for calling ${companyName}. How can I help you today?`
+      }
 
       await redis.set(stateKey, { messageCount: 1 } satisfies RedisState, { ex: STATE_TTL })
 
@@ -193,19 +206,29 @@ ${servicesList || '(No services listed — ask what they need and offer to have 
 HOURS: ${hoursText || 'Contact us for availability'}
 ${transferNumber ? 'Transfer to the owner is available if they request it.' : 'Direct transfer is not available — take a message instead.'}
 ${instructions ? `\nSPECIAL INSTRUCTIONS (FOLLOW STRICTLY):\n${instructions}\n` : ''}${recognizedCustomer ? `\nCALLER CONTEXT (use to personalize — don't recite it all):\n${recognizedCustomer.contextSummary}\n- Greet by first name. If they have an open quote or upcoming job, ask if that's why they're calling.\n` : ''}
+CRITICAL RULES:
+- ALWAYS call capture_lead as soon as you have the caller's name and phone — even if they're not scheduling. Every caller must be saved.
+- NEVER say "I don't have access to appointments" — use lookup_customer_jobs to find their existing bookings.
+- NEVER make up appointment times — ALWAYS use check_availability first.
+- If a tool fails or you truly can't help, offer to transfer (if available) or take a message for a callback.
+
 CALL FLOW:
 1. Listen to their need, give a SHORT answer with pricing if relevant
-2. Ask if they'd like to schedule or leave their info for a callback
-3. Collect their info naturally: name, best callback number, street address, and city — one question at a time
-4. Use capture_lead to save name, phone, address, city, and job type
-5. If scheduling: use check_availability to find REAL openings — NEVER make up times
-6. After they pick a slot: use schedule_appointment to book it
-7. Confirm details and wrap up
+2. Collect their info naturally: name, best callback number, street address, and city — one question at a time
+3. Call capture_lead to save their info AS SOON as you have name + phone (don't wait until the end)
+4. If scheduling: use check_availability to find REAL openings, let them pick, then schedule_appointment
+5. If cancelling/rescheduling: use lookup_customer_jobs to find their appointment, then help accordingly
+6. Confirm details and wrap up
 
 SCHEDULING RULES:
 - ALWAYS use check_availability before suggesting times — never guess
 - ALWAYS use capture_lead before schedule_appointment
 - Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (${new Date().toISOString().split('T')[0]})
+
+CANCELLATION / RESCHEDULING:
+- If the caller wants to cancel or reschedule, use lookup_customer_jobs with their name or phone to find their appointments
+- Confirm which appointment they mean
+- You cannot directly cancel or modify — note the request via capture_lead (set notes to the cancellation/reschedule details) and let them know the owner will confirm
 
 ENDING THE CALL:
 - Confirm what was discussed before ending
@@ -314,6 +337,20 @@ ENDING THE CALL:
           },
         },
       },
+      {
+        type: 'function',
+        function: {
+          name: 'lookup_customer_jobs',
+          description: 'Look up existing appointments for a customer by name or phone number. Use when caller asks about cancelling, rescheduling, or checking an existing appointment.',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: 'Customer name to search for' },
+              phone: { type: 'string', description: 'Customer phone number to search for' },
+            },
+          },
+        },
+      },
     ]
 
     const boundModel = model.bindTools(tools.map(t => ({
@@ -325,7 +362,7 @@ ENDING THE CALL:
     // Text responses skip filler entirely: Claude Haiku is fast enough
     const filler = hasToolResults
       ? null
-      : (lastUserMessage.match(/schedul|book|appointment|avail.*slot|open.*slot|time.*slot/i)
+      : (lastUserMessage.match(/schedul|book|appointment|avail.*slot|open.*slot|time.*slot|cancel|reschedul|existing.*appointment/i)
           ? TOOL_FILLERS[Math.floor(Math.random() * TOOL_FILLERS.length)]
           : null)
 

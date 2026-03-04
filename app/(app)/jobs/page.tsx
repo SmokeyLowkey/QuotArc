@@ -51,7 +51,10 @@ export default function JobsPage() {
   const [expandedDay, setExpandedDay] = useState<string | null>(null)
 
   const weekRange = getWeekRange(weekOffset)
-  const { jobs, loading, jobsByStatus, jobsByDate, moveJob, completeJob, deleteJob, updateJob } = useJobs(weekRange)
+  // Kanban shows ALL active jobs (no date filter); list view filters by week
+  const { jobs, loading, jobsByStatus, jobsByDate, moveJob, completeJob, deleteJob, updateJob } = useJobs(
+    view === 'list' ? weekRange : undefined
+  )
 
   const toggleView = (v: ViewMode) => {
     setView(v)

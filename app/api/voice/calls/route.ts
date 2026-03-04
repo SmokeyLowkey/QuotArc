@@ -20,12 +20,20 @@ export async function GET(request: NextRequest) {
 
   const { searchParams } = new URL(request.url)
   const filter = searchParams.get('filter') // appointment_set | needs_follow_up | no_lead
+  const days = parseInt(searchParams.get('days') || '30', 10) // default 30 days
   const page = Math.max(1, parseInt(searchParams.get('page') || '1', 10))
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20', 10)))
   const skip = (page - 1) * limit
 
   // Build where clause
   const where: Record<string, unknown> = { user_id: user.id }
+
+  // Date filter (0 = all time)
+  if (days > 0) {
+    const since = new Date()
+    since.setDate(since.getDate() - days)
+    where.created_at = { gte: since }
+  }
 
   if (filter === 'appointment_set') {
     where.appointment_set = true

@@ -13,7 +13,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useVoiceCalls, type LeadFilter } from '@/hooks/use-voice-calls'
+import { useVoiceCalls, type LeadFilter, type DateRange } from '@/hooks/use-voice-calls'
 import { PageHeader } from '@/components/page-header'
 import { MetricStrip } from '@/components/metric-strip'
 import { FilterSidebar } from '@/components/filter-sidebar'
@@ -25,6 +25,13 @@ const FILTER_OPTIONS = [
   { id: 'appointment_set', label: 'Appointment Set' },
   { id: 'needs_follow_up', label: 'Needs Follow-up' },
   { id: 'no_lead', label: 'No Lead' },
+]
+
+const DATE_OPTIONS: { id: DateRange; label: string }[] = [
+  { id: '7', label: '7 days' },
+  { id: '30', label: '30 days' },
+  { id: '90', label: '90 days' },
+  { id: '0', label: 'All time' },
 ]
 
 function getLeadBadge(call: { appointment_set: boolean; lead_captured: boolean }) {
@@ -49,7 +56,7 @@ function formatDate(dateStr: string): string {
 }
 
 export default function LeadsPage() {
-  const { calls, loading, filter, setFilter, page, setPage, pagination } = useVoiceCalls('all')
+  const { calls, loading, filter, setFilter, days, setDays, page, setPage, pagination } = useVoiceCalls('all')
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   const counts: Record<string, number> = {}
@@ -83,9 +90,10 @@ export default function LeadsPage() {
 
         {/* Call list column */}
         <div className="flex-1 min-w-0">
-          {/* Mobile filter row */}
-          <div className="lg:hidden flex items-center gap-2 mb-3">
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          {/* Date range + mobile filters */}
+          <div className="flex items-center justify-between gap-3 mb-3">
+            {/* Mobile filter pills */}
+            <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-0.5">
               {FILTER_OPTIONS.map(f => (
                 <button
                   key={f.id}
@@ -98,6 +106,24 @@ export default function LeadsPage() {
                   )}
                 >
                   {f.label}
+                </button>
+              ))}
+            </div>
+            {/* Date range selector */}
+            <div className="flex items-center gap-1 shrink-0 ml-auto">
+              <Clock size={12} className="text-sf-text-tertiary" />
+              {DATE_OPTIONS.map(d => (
+                <button
+                  key={d.id}
+                  onClick={() => setDays(d.id)}
+                  className={cn(
+                    'px-2 py-1 rounded text-[11px] font-medium transition-colors whitespace-nowrap',
+                    days === d.id
+                      ? 'bg-sf-accent/10 text-sf-accent'
+                      : 'text-sf-text-tertiary hover:text-sf-text-secondary',
+                  )}
+                >
+                  {d.label}
                 </button>
               ))}
             </div>

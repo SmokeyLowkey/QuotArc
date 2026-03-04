@@ -76,5 +76,13 @@ export function useCustomers() {
     return { data, error }
   }, [supabase])
 
-  return { customers, loading, page, setPage, search, setSearch, pagination, addCustomer, updateCustomer }
+  const deleteCustomer = useCallback(async (id: string) => {
+    const res = await fetch(`/api/customers/${id}`, { method: 'DELETE' })
+    if (res.ok) {
+      setCustomers(prev => prev.filter(c => c.id !== id))
+    }
+    return res.ok
+  }, [])
+
+  return { customers, loading, page, setPage, search, setSearch, pagination, addCustomer, updateCustomer, deleteCustomer }
 }
