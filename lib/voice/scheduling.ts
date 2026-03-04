@@ -25,6 +25,64 @@ export const DAY_NAMES: Record<number, string> = {
   0: 'sun', 1: 'mon', 2: 'tue', 3: 'wed', 4: 'thu', 5: 'fri', 6: 'sat',
 }
 
+/**
+ * Get today's date as YYYY-MM-DD in the given IANA timezone.
+ * Falls back to UTC if the timezone is invalid.
+ */
+export function todayInTimezone(tz: string): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(new Date())
+    const y = parts.find(p => p.type === 'year')!.value
+    const m = parts.find(p => p.type === 'month')!.value
+    const d = parts.find(p => p.type === 'day')!.value
+    return `${y}-${m}-${d}`
+  } catch {
+    return new Date().toISOString().split('T')[0]
+  }
+}
+
+/**
+ * Get the day-of-week index (0=Sun) for a YYYY-MM-DD string
+ * interpreted in the given IANA timezone.
+ */
+export function dayOfWeekInTimezone(dateStr: string, tz: string): number {
+  try {
+    const weekday = new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+    }).format(new Date(dateStr + 'T12:00:00Z'))
+    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+    return map[weekday] ?? new Date(dateStr + 'T12:00:00Z').getUTCDay()
+  } catch {
+    return new Date(dateStr + 'T12:00:00Z').getUTCDay()
+  }
+}
+
+/**
+ * Format a YYYY-MM-DD date string for speech, using the given timezone.
+ */
+export function formatDateForSpeech(dateStr: string, tz: string): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+    }).format(new Date(dateStr + 'T12:00:00Z'))
+  } catch {
+    return new Date(dateStr + 'T12:00:00Z').toLocaleDateString('en-US', {
+      weekday: 'long',
+      month: 'long',
+      day: 'numeric',
+    })
+  }
+}
+
 export interface TimeWindow {
   start: number
   end: number

@@ -22,6 +22,9 @@ import {
   findAvailableSlots,
   filterSlotsByPreference,
   formatSlotsForSpeech,
+  todayInTimezone,
+  dayOfWeekInTimezone,
+  formatDateForSpeech,
 } from '@/lib/voice/scheduling'
 import { normalizePhone, phonesMatch } from '@/lib/voice/phone'
 
@@ -109,6 +112,7 @@ async function handleAssistantRequest(message: Record<string, unknown>) {
       receptionist_transfer_number: true,
       receptionist_date_overrides: true,
       receptionist_instructions: true,
+      timezone: true,
     },
   })
 
@@ -151,7 +155,8 @@ async function handleAssistantRequest(message: Record<string, unknown>) {
     .join(', ')
 
   const dateOverrides = (profile.receptionist_date_overrides as Record<string, string>) ?? {}
-  const todayStr = new Date().toISOString().split('T')[0]
+  const userTz = profile.timezone ?? 'America/Chicago'
+  const todayStr = todayInTimezone(userTz)
   const closedToday = dateOverrides[todayStr] === 'closed'
 
   const systemPrompt = `You are the phone receptionist for ${profile.company_name}.
@@ -189,7 +194,7 @@ CALL FLOW:
 SCHEDULING RULES:
 - ALWAYS use check_availability before suggesting any times — never guess or make up availability
 - ALWAYS use capture_lead before schedule_appointment
-- Today's date is ${new Date().toISOString().split('T')[0]}
+- Today's date is ${todayStr}
 
 CANCELLATION / RESCHEDULING:
 - If the caller wants to cancel or reschedule, use lookup_customer_jobs with their name or phone to find their appointments
@@ -221,6 +226,7 @@ ENDING THE CALL:
       metadata: {
         user_id: profile.id,
         company_name: profile.company_name,
+        timezone: userTz,
         services,
         hours,
         transfer_number: profile.receptionist_transfer_number,
@@ -407,47 +413,49 @@ async function toolCheckAvailability(
   if (!userId) return { available: false, message: 'Unable to check schedule right now.' }
 
   const dateStr = args.date as string
-  const date = new Date(dateStr + 'T00:00:00')
-  if (isNaN(date.getTime())) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr) || isNaN(new Date(dateStr + 'T12:00:00Z').getTime())) {
     return { available: false, message: "I couldn't understand that date. Could you try again?" }
   }
 
   const timePref = args.time_preference as string | undefined
 
-  // Fetch profile for business hours, date overrides, and default job duration
+  // Fetch profile for business hours, date overrides, default job duration, and timezone
   const profile = await prisma.profile.findUnique({
     where: { id: userId },
     select: {
       receptionist_hours: true,
       receptionist_date_overrides: true,
       default_job_duration: true,
+      timezone: true,
     },
   })
 
   const hours = (profile?.receptionist_hours ?? {}) as Record<string, { start: string; end: string }>
   const dateOverrides = (profile?.receptionist_date_overrides ?? {}) as Record<string, string>
   const jobDuration = Number(profile?.default_job_duration ?? 2) * 60 // convert to minutes
+  const tz = profile?.timezone ?? 'America/Chicago'
 
   // Check one-time date override first (takes priority over recurring hours)
   if (dateOverrides[dateStr] === 'closed') {
-    const dayDisplay = date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
-    return { available: false, message: `We're not available on ${dayDisplay} — it's a day off. Would you like to try another date?` }
+    return { available: false, message: `We're not available on ${formatDateForSpeech(dateStr, tz)} — it's a day off. Would you like to try another date?` }
   }
 
-  // Get business hours for this day of week
-  const dayKey = DAY_NAMES[date.getDay()]
+  // Get business hours for this day of week (timezone-aware)
+  const dayKey = DAY_NAMES[dayOfWeekInTimezone(dateStr, tz)]
   const dayHours = hours[dayKey]
 
   if (!dayHours) {
-    return { available: false, message: `We're not open on ${date.toLocaleDateString('en-US', { weekday: 'long' })}s. Would you like to try another day?` }
+    const weekdayName = formatDateForSpeech(dateStr, tz).split(',')[0] || 'that day'
+    return { available: false, message: `We're not open on ${weekdayName}s. Would you like to try another day?` }
   }
 
   const businessStart = timeToMinutes(dayHours.start)
   const businessEnd = timeToMinutes(dayHours.end)
 
   // Fetch existing jobs on that date with time info
-  const startOfDay = new Date(dateStr + 'T00:00:00')
-  const endOfDay = new Date(dateStr + 'T23:59:59')
+  // @db.Date fields are stored as UTC midnight, so query with Z suffix
+  const startOfDay = new Date(dateStr + 'T00:00:00Z')
+  const endOfDay = new Date(dateStr + 'T23:59:59Z')
 
   const existingJobs = await prisma.job.findMany({
     where: {
@@ -474,14 +482,16 @@ async function toolCheckAvailability(
     // No slots available — find next day with openings
     let suggestion = ''
     for (let i = 1; i <= 7; i++) {
-      const nextDate = new Date(date)
-      nextDate.setDate(nextDate.getDate() + i)
-      const nextDayKey = DAY_NAMES[nextDate.getDay()]
+      // Compute next date as YYYY-MM-DD string to avoid timezone drift
+      const d = new Date(dateStr + 'T12:00:00Z')
+      d.setUTCDate(d.getUTCDate() + i)
+      const nextDateStr = d.toISOString().split('T')[0]
+      const nextDayKey = DAY_NAMES[dayOfWeekInTimezone(nextDateStr, tz)]
       const nextDayHours = hours[nextDayKey]
       if (!nextDayHours) continue
 
-      const nextStart = new Date(nextDate.toISOString().split('T')[0] + 'T00:00:00')
-      const nextEnd = new Date(nextDate.toISOString().split('T')[0] + 'T23:59:59')
+      const nextStart = new Date(nextDateStr + 'T00:00:00Z')
+      const nextEnd = new Date(nextDateStr + 'T23:59:59Z')
 
       const count = await prisma.job.count({
         where: {
@@ -494,7 +504,7 @@ async function toolCheckAvailability(
       // Rough check — if fewer jobs than could fit, suggest this day
       const maxSlots = Math.floor((timeToMinutes(nextDayHours.end) - timeToMinutes(nextDayHours.start)) / jobDuration)
       if (count < maxSlots) {
-        suggestion = nextDate.toISOString().split('T')[0]
+        suggestion = nextDateStr
         break
       }
     }
@@ -502,7 +512,7 @@ async function toolCheckAvailability(
     return {
       available: false,
       slots: [],
-      message: `That day is fully booked.${suggestion ? ` The next available day is ${new Date(suggestion + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}.` : ' Please try another date.'}`,
+      message: `That day is fully booked.${suggestion ? ` The next available day is ${formatDateForSpeech(suggestion, tz)}.` : ' Please try another date.'}`,
     }
   }
 
@@ -633,8 +643,8 @@ async function toolScheduleAppointment(
 
   const estimatedHours = Number(profile?.default_job_duration ?? 2)
 
-  // Create the job
-  const scheduledDate = new Date(dateStr + 'T00:00:00')
+  // Create the job — use UTC midnight for @db.Date fields
+  const scheduledDate = new Date(dateStr + 'T00:00:00Z')
   if (isNaN(scheduledDate.getTime())) {
     return { success: false, message: "I couldn't understand that date. Could you try again?" }
   }
@@ -738,16 +748,20 @@ async function toolLookupCustomerJobs(
     }
   }
 
-  // Fetch upcoming jobs for matched customers
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  // Fetch upcoming jobs for matched customers — use user timezone for "today"
+  const profile = await prisma.profile.findUnique({
+    where: { id: userId },
+    select: { timezone: true },
+  })
+  const tz = profile?.timezone ?? 'America/Chicago'
+  const todayUtc = new Date(todayInTimezone(tz) + 'T00:00:00Z')
 
   const jobs = await prisma.job.findMany({
     where: {
       user_id: userId,
       customer_id: { in: uniqueIds },
       status: { in: ['scheduled', 'in_progress'] },
-      scheduled_date: { gte: today },
+      scheduled_date: { gte: todayUtc },
     },
     select: {
       job_type: true,
@@ -768,7 +782,8 @@ async function toolLookupCustomerJobs(
   }
 
   const jobList = jobs.map(j => {
-    const date = j.scheduled_date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+    const dateStr = j.scheduled_date.toISOString().split('T')[0]
+    const date = formatDateForSpeech(dateStr, tz)
     const time = j.start_time ? ` at ${formatTimeForSpeech(j.start_time)}` : ''
     return `${j.job_type} on ${date}${time} (${j.status === 'in_progress' ? 'in progress' : j.status})`
   })

@@ -148,6 +148,7 @@ model Profile {
   receptionist_instructions       String?
   default_job_duration            Decimal   @default(2) @db.Decimal(4, 1)
   province               String?   @default("AB")
+  timezone               String    @default("America/Chicago")
   created_at             DateTime  @default(now()) @db.Timestamptz()
 
   customers       Customer[]

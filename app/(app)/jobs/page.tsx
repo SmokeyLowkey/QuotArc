@@ -143,9 +143,11 @@ export default function JobsPage() {
       )}
       {sortedDates.map(date => {
         const dayJobs = jobsByDate[date]
-        const d = new Date(date + 'T00:00:00')
+        const d = new Date(date + 'T12:00:00Z')
         const dayLabel = d.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' })
-        const isToday = date === new Date().toISOString().split('T')[0]
+        const now = new Date()
+        const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+        const isToday = date === localToday
 
         return (
           <div key={date}>

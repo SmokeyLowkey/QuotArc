@@ -51,6 +51,7 @@ export interface Profile {
   receptionist_date_overrides: Record<string, 'closed'>
   receptionist_instructions: string | null
   province: string | null
+  timezone: string
   // Stripe Connect
   stripe_account_id: string | null
   stripe_onboarding_complete: boolean

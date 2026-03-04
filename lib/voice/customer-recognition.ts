@@ -19,6 +19,13 @@ export interface RecognizedCustomer {
 /**
  * Look up a customer by caller phone number for a given electrician.
  * Uses normalized phone matching to handle format differences.
+ *
+ * Matching strategy (in order):
+ * 1. Customer.phone matches caller ID — direct phone match
+ * 2. Past voiceCall.caller_number matches — the customer called from this
+ *    number before, even if their stored phone is different (e.g., they
+ *    gave their mobile as callback but called from their landline)
+ *
  * Returns null if no match found.
  */
 export async function recognizeCallerByPhone(
@@ -27,8 +34,7 @@ export async function recognizeCallerByPhone(
 ): Promise<RecognizedCustomer | null> {
   if (!callerNumber) return null
 
-  // Fetch customers with phone for this electrician.
-  // Typically <500 per user — fast enough for in-memory filtering.
+  // Strategy 1: Match against stored customer phone numbers
   const customers = await prisma.customer.findMany({
     where: {
       user_id: userId,
@@ -46,7 +52,42 @@ export async function recognizeCallerByPhone(
     },
   })
 
-  const match = customers.find(c => phonesMatch(c.phone, callerNumber))
+  let match = customers.find(c => phonesMatch(c.phone, callerNumber))
+
+  // Strategy 2: Check past voiceCalls — maybe they called from this number
+  // before but gave a different callback number (e.g., called from landline
+  // but gave mobile as callback)
+  if (!match) {
+    const recentCalls = await prisma.voiceCall.findMany({
+      where: {
+        user_id: userId,
+        caller_number: { not: null },
+        customer_id: { not: null },
+      },
+      select: { caller_number: true, customer_id: true },
+      orderBy: { created_at: 'desc' },
+      take: 100,
+    })
+    const linkedCall = recentCalls.find(c => phonesMatch(c.caller_number, callerNumber))
+    if (linkedCall?.customer_id) {
+      // Customer might already be in our customers array, or might have no phone
+      match = customers.find(c => c.id === linkedCall.customer_id)
+        ?? (await prisma.customer.findUnique({
+          where: { id: linkedCall.customer_id },
+          select: {
+            id: true,
+            name: true,
+            phone: true,
+            address: true,
+            city: true,
+            property_notes: true,
+            panel_size: true,
+            service_amps: true,
+          },
+        })) ?? undefined
+    }
+  }
+
   if (!match) return null
 
   // Fetch recent history in parallel

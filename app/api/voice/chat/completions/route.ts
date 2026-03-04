@@ -20,6 +20,7 @@ import { ChatOpenAI } from '@langchain/openai'
 import { HumanMessage, AIMessage, SystemMessage, ToolMessage } from '@langchain/core/messages'
 import type { BaseMessage } from '@langchain/core/messages'
 import { hasFeature, PLANS, type PlanTier } from '@/lib/plans'
+import { todayInTimezone } from '@/lib/voice/scheduling'
 
 export const dynamic = 'force-dynamic'
 
@@ -100,6 +101,7 @@ export async function POST(request: NextRequest) {
     let instructions: string | null = (metadata?.instructions as string) ?? null
     let recognizedCustomer = metadata?.recognized_customer as { id: string; name: string; contextSummary: string } | null | undefined
     let userId = (metadata?.user_id as string) ?? ''
+    let userTimezone = (metadata?.timezone as string) || 'America/Chicago'
     const callerNumber = (body.call?.customer as Record<string, unknown>)?.number as string | undefined
 
     // If no metadata, look up by phoneNumberId (fallback for direct calls / static assistant)
@@ -117,6 +119,7 @@ export async function POST(request: NextRequest) {
           receptionist_hours: true,
           receptionist_transfer_number: true,
           receptionist_instructions: true,
+          timezone: true,
         },
       })
 
@@ -127,6 +130,7 @@ export async function POST(request: NextRequest) {
         hours = (profile.receptionist_hours as typeof hours) ?? {}
         transferNumber = profile.receptionist_transfer_number
         instructions = profile.receptionist_instructions
+        userTimezone = profile.timezone ?? 'America/Chicago'
 
         const tier = profile.plan_tier as PlanTier
         if (!hasFeature(tier, 'aiReceptionist')) {
@@ -223,7 +227,7 @@ CALL FLOW:
 SCHEDULING RULES:
 - ALWAYS use check_availability before suggesting times — never guess
 - ALWAYS use capture_lead before schedule_appointment
-- Today is ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (${new Date().toISOString().split('T')[0]})
+- Today is ${new Date().toLocaleDateString('en-US', { timeZone: userTimezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })} (${todayInTimezone(userTimezone)})
 
 CANCELLATION / RESCHEDULING:
 - If the caller wants to cancel or reschedule, use lookup_customer_jobs with their name or phone to find their appointments

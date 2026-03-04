@@ -122,19 +122,19 @@ export async function POST() {
   })
   const existingIds = new Set(existing.map((e: (typeof existing)[number]) => e.vapi_call_id))
 
-  // Patch existing records — update lead detection + backfill recordings
+  // Patch existing records — only backfill recording URL and summary.
+  // NEVER overwrite lead_captured / appointment_set here — the webhook
+  // sets those from actual tool-call results (ground truth). The heuristic
+  // detectLeadFromTranscript is only for brand-new records below.
   for (const call of endedCalls.filter(c => existingIds.has(c.id))) {
-    const { leadCaptured, appointmentSet } = detectLeadFromTranscript(
-      call.artifact?.messages ?? []
-    )
     const recordingUrl = call.artifact?.stereoRecordingUrl
       || call.artifact?.recordingUrl
       || null
+    const summary = call.analysis?.summary ?? null
 
     const updates: Record<string, unknown> = {}
-    if (leadCaptured) updates.lead_captured = true
-    if (appointmentSet) updates.appointment_set = true
     if (recordingUrl) updates.recording_url = recordingUrl
+    if (summary) updates.summary = summary
 
     if (Object.keys(updates).length > 0) {
       await prisma.voiceCall.update({

@@ -25,6 +25,8 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false)
   const [logoUploading, setLogoUploading] = useState(false)
   const [logoUrl, setLogoUrl] = useState<string | null>(null)
+  // Timezone
+  const [timezone, setTimezone] = useState('America/Chicago')
   // Google Reviews
   const [googlePlaceId, setGooglePlaceId] = useState('')
   const [googleAutoSend, setGoogleAutoSend] = useState(true)
@@ -49,6 +51,8 @@ export default function SettingsPage() {
           ? profile.quick_reply_templates
           : DEFAULT_TEMPLATES
       )
+      // Timezone
+      setTimezone(profile.timezone || 'America/Chicago')
       // Google Reviews
       setGooglePlaceId(profile.google_place_id || '')
       setGoogleAutoSend(profile.google_review_auto_send ?? true)
@@ -89,6 +93,7 @@ export default function SettingsPage() {
         default_tax_rate: (Number(defaultTaxRate) || 5) / 100,
         follow_up_template: followUpTemplate || null,
         quick_reply_templates: quickReplies,
+        timezone,
         google_place_id: googlePlaceId || null,
         google_review_auto_send: googleAutoSend,
         google_review_delay_hours: Number(googleDelayHours) || 24,
@@ -131,6 +136,31 @@ export default function SettingsPage() {
             <SettingsField label="Phone" value={phone} onChange={setPhone} />
             <SettingsField label="Email" value={email} onChange={setEmail} />
             <SettingsField label="Address" value={address} onChange={setAddress} full />
+            <div className="md:col-span-2">
+              <label className="text-[11px] uppercase tracking-[0.05em] font-semibold text-sf-text-secondary block mb-1.5">
+                Timezone
+              </label>
+              <select
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                className="w-full h-9 px-3 bg-sf-surface-2 border border-sf-border rounded-[4px] text-[13px] text-sf-text-primary focus:outline-none focus:ring-1 focus:ring-sf-accent"
+              >
+                <option value="America/New_York">Eastern (ET)</option>
+                <option value="America/Chicago">Central (CT)</option>
+                <option value="America/Denver">Mountain (MT)</option>
+                <option value="America/Los_Angeles">Pacific (PT)</option>
+                <option value="America/Anchorage">Alaska (AKT)</option>
+                <option value="America/Phoenix">Arizona (no DST)</option>
+                <option value="Pacific/Honolulu">Hawaii (HT)</option>
+                <option value="America/Halifax">Atlantic (AT)</option>
+                <option value="America/St_Johns">Newfoundland (NT)</option>
+                <option value="America/Edmonton">Mountain - Canada (MT)</option>
+                <option value="America/Winnipeg">Central - Canada (CT)</option>
+                <option value="America/Toronto">Eastern - Canada (ET)</option>
+                <option value="America/Vancouver">Pacific - Canada (PT)</option>
+                <option value="America/Regina">Saskatchewan (CT, no DST)</option>
+              </select>
+            </div>
           </div>
           <div className="mt-3">
             <span className="text-[11px] uppercase tracking-[0.05em] font-semibold text-sf-text-secondary block mb-1.5">

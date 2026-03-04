@@ -26,6 +26,7 @@ const jetbrainsMono = JetBrains_Mono({
 export const metadata: Metadata = {
   title: 'QuotArc — Quote to Cash for Electricians',
   description: 'Send quotes in 60 seconds, follow up automatically, invoice when the job is done.',
+  icons: { icon: '/favicon.ico' },
 }
 
 export const viewport: Viewport = {

@@ -47,6 +47,7 @@ export async function PATCH(request: NextRequest) {
     'receptionist_enabled', 'receptionist_greeting', 'receptionist_services',
     'receptionist_hours', 'receptionist_transfer_number',
     'province',
+    'timezone',
   ] as const
 
   const updates: Record<string, unknown> = {}
