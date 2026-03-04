@@ -2,6 +2,11 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireUser, AuthError, unauthorizedResponse } from '@/lib/auth'
 
+type Dec = { toNumber(): number }
+type InvoiceRow = { status: string; total: Dec; paid_at: Date | null }
+type QuoteRow = { status: string; total: Dec; sent_at: Date | null }
+type ChartRow = { total: Dec; paid_at: Date | null }
+
 export async function GET() {
   let user
   try {
@@ -37,13 +42,8 @@ export async function GET() {
   })
 
   const [invoices, quotes, jobGroups, jobsCompletedThisMonth, paidForChart] =
-    await Promise.all([invoicesP, quotesP, jobGroupsP, jobsCompletedP, paidForChartP]) as [
-      Awaited<typeof invoicesP>,
-      Awaited<typeof quotesP>,
-      Awaited<typeof jobGroupsP>,
-      Awaited<typeof jobsCompletedP>,
-      Awaited<typeof paidForChartP>,
-    ]
+    await Promise.all([invoicesP, quotesP, jobGroupsP, jobsCompletedP, paidForChartP]) as
+      [InvoiceRow[], QuoteRow[], { status: string; _count: { id: number } }[], number, ChartRow[]]
 
   // ── Invoice KPIs ──────────────────────────────────────────
   const paidInvoices = invoices.filter(i => i.status === 'paid')
