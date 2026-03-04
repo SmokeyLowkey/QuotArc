@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "skills": {
+    "blog-post": {
+      "source": "langchain-ai/deepagents",
+      "sourceType": "github",
+      "computedHash": "1c28fc52836ddfd902348d9ea8e196d3d7a43c06c47c926256d48408936c7092"
+    },
+    "n8n-code-javascript": {
+      "source": "czlonkowski/n8n-skills",
+      "sourceType": "github",
+      "computedHash": "2aa77ad6c61f2cfb7b266ffe061575352579034b37a4b6d4bb68a11f8d4cf0a1"
+    },
+    "n8n-expression-syntax": {
+      "source": "czlonkowski/n8n-skills",
+      "sourceType": "github",
+      "computedHash": "3e28711cdf2a53dae95f3b79b7f329304f68c7bb97c1778badf1f30ff6d897af"
+    },
+    "n8n-mcp-tools-expert": {
+      "source": "czlonkowski/n8n-skills",
+      "sourceType": "github",
+      "computedHash": "7b72bbbbc2f475e35f5697069046d46417997c054442ee46ade10abd4224d32b"
+    },
+    "n8n-node-configuration": {
+      "source": "czlonkowski/n8n-skills",
+      "sourceType": "github",
+      "computedHash": "367423ff617612507094c6f3f0cedff8440a1efe21f1b0c820de459726b2cab0"
+    },
+    "n8n-validation-expert": {
+      "source": "czlonkowski/n8n-skills",
+      "sourceType": "github",
+      "computedHash": "51022efd848545c0494c04fa05864360f2c9832fdfbdf69ce9b24b8079de7ebc"
+    },
+    "n8n-workflow-patterns": {
+      "source": "czlonkowski/n8n-skills",
+      "sourceType": "github",
+      "computedHash": "52998bacfadee37835bfa434d08a23c76fa04092f757660708fe014c3594877c"
+    },
+    "remotion-best-practices": {
+      "source": "remotion-dev/skills",
+      "sourceType": "github",
+      "computedHash": "7b8684825df186314a85cc61a83d0587cd61f824103ee546aef877a10f4f9255"
+    },
+    "technical-blog-writing": {
+      "source": "inference-sh-9/skills",
+      "sourceType": "github",
+      "computedHash": "e10b50e042a6a3d89ad4b46e3567ac5fab1f36272095f152d639d5d0fa9e248a"
+    },
+    "vercel-composition-patterns": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "10eb4ec94577b79ae98c63ce3e7f35f8a6a06436a4011bff083b397de6960eeb"
+    },
+    "vercel-react-best-practices": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "61f8c307aa8ce0c4c52da8886d42e344dab83f76f9b5360cf8923b25fb1d67bb"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/agent-skills",
+      "sourceType": "github",
+      "computedHash": "d8e7d3afe37dcc8a97b99ffb5afdb4d0919ae0092ea8b68f44eb201f035e33ac"
+    }
+  }
+}

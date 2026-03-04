@@ -1,0 +1,510 @@
+// QuotArc — Prisma Schema
+// Supabase Postgres (uses SUPABASE_DIRECT_URL for direct connection)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum QuoteStatus {
+  draft
+  sent
+  viewed
+  accepted
+  expired
+}
+
+enum DeliveryStatus {
+  pending
+  delivered
+  failed
+}
+
+enum InvoiceStatus {
+  draft
+  sent
+  paid
+  overdue
+}
+
+enum LineItemCategory {
+  material
+  labor
+  permit
+  other
+}
+
+enum ActivityEventType {
+  quote_sent
+  quote_viewed
+  quote_follow_up
+  quote_accepted
+  quote_expired
+  message_sent
+  customer_replied
+  invoice_sent
+  invoice_paid
+  invoice_overdue
+  invoice_reminder
+  job_scheduled
+  review_requested
+  voice_call_received
+  voice_call_lead_captured
+  voice_call_transferred
+  voice_call_appointment_set
+}
+
+enum NotificationType {
+  quote_viewed
+  quote_accepted
+  customer_replied
+  invoice_paid
+  review_requested
+  voice_call_lead
+  voice_call_missed
+}
+
+enum JobStatus {
+  scheduled
+  in_progress
+  completed
+}
+
+enum MessageDirection {
+  outbound
+  inbound
+}
+
+enum MessageChannel {
+  portal
+  note
+}
+
+enum MessageType {
+  text
+  image
+  file
+  audio
+  quote_card
+  invoice_card
+  schedule_card
+}
+
+enum PlanTier {
+  free
+  starter
+  pro
+  business
+}
+
+// ============================================================
+// PROFILES (extends Supabase auth.users)
+// ============================================================
+
+model Profile {
+  id                 String   @id @db.Uuid
+  email              String
+  company_name       String
+  phone              String?
+  address            String?
+  license_number     String?
+  logo_url           String?
+  default_tax_rate   Decimal  @default(0.05) @db.Decimal(5, 4)
+  default_labor_rate Decimal  @default(95.00) @db.Decimal(8, 2)
+  follow_up_template     String?   @default("Hi {customer_name}, just following up on the quote I sent for {job_type}. Let me know if you have any questions.")
+  quick_reply_templates  Json      @default("[]")
+  email_verified         Boolean   @default(false)
+  verification_token     String?   @unique
+  verification_expires   DateTime? @db.Timestamptz()
+  stripe_customer_id         String?   @unique
+  stripe_subscription_id     String?
+  stripe_account_id          String?   // Stripe Connect Express account ID
+  stripe_onboarding_complete Boolean   @default(false)
+  plan_status                String    @default("free") // free | active | past_due | canceled
+  plan_tier                  PlanTier  @default(free)
+  voice_minutes_used     Int       @default(0)
+  voice_minutes_balance  Int       @default(0)     // purchased pack credits — roll over monthly
+  voice_minutes_reset_at DateTime? @db.Timestamptz()
+  // Google Reviews
+  google_place_id           String?
+  google_review_auto_send   Boolean   @default(true)
+  google_review_delay_hours Int       @default(24)
+  // AI Receptionist
+  vapi_phone_number_id       String?
+  vapi_phone_number          String?
+  receptionist_enabled       Boolean   @default(false)
+  receptionist_greeting      String?   @default("Hi, thanks for calling {company_name}. How can I help you today?")
+  receptionist_services      Json      @default("[]")
+  receptionist_hours         Json      @default("{}")
+  receptionist_transfer_number    String?
+  receptionist_date_overrides     Json      @default("{}")
+  default_job_duration            Decimal   @default(2) @db.Decimal(4, 1)
+  province               String?   @default("AB")
+  created_at             DateTime  @default(now()) @db.Timestamptz()
+
+  customers       Customer[]
+  quotes          Quote[]
+  quote_messages  QuoteMessage[]
+  invoices        Invoice[]
+  activity_events ActivityEvent[]
+  notifications   Notification[]
+  jobs            Job[]
+  voice_calls     VoiceCall[]
+
+  @@map("profiles")
+}
+
+// ============================================================
+// CUSTOMERS
+// ============================================================
+
+model Customer {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id        String   @db.Uuid
+  name           String
+  email          String?
+  phone          String?
+  address        String?
+  city           String?
+  province       String?
+  square_footage  Int?
+  property_notes  String?
+  panel_size      String?
+  service_amps    String?
+  created_at     DateTime @default(now()) @db.Timestamptz()
+  updated_at     DateTime @default(now()) @db.Timestamptz()
+
+  user     Profile   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  quotes   Quote[]
+  invoices Invoice[]
+  jobs     Job[]
+
+  @@index([user_id], name: "idx_customers_user")
+  @@map("customers")
+}
+
+// ============================================================
+// JOB TEMPLATES (global, read-only for users)
+// ============================================================
+
+model JobTemplate {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name            String
+  slug            String  @unique
+  description     String?
+  icon            String
+  labor_hours_min Decimal? @db.Decimal(4, 1)
+  labor_hours_max Decimal? @db.Decimal(4, 1)
+  price_range_min Decimal? @db.Decimal(10, 2)
+  price_range_max Decimal? @db.Decimal(10, 2)
+  sort_order      Int     @default(0)
+
+  items JobTemplateItem[]
+
+  @@map("job_templates")
+}
+
+model JobTemplateItem {
+  id              String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  template_id     String  @db.Uuid
+  description     String
+  category        LineItemCategory @default(material)
+  default_qty     Decimal @default(1) @db.Decimal(8, 2)
+  unit            String  @default("ea")
+  price_range_low  Decimal? @db.Decimal(10, 2)
+  price_range_high Decimal? @db.Decimal(10, 2)
+  is_conditional  Boolean @default(false)
+  condition_note  String?
+  sort_order      Int     @default(0)
+
+  template JobTemplate @relation(fields: [template_id], references: [id], onDelete: Cascade)
+
+  @@map("job_template_items")
+}
+
+// ============================================================
+// QUOTES
+// ============================================================
+
+model Quote {
+  id              String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String         @db.Uuid
+  customer_id     String         @db.Uuid
+  quote_number    String
+  status          QuoteStatus    @default(draft)
+  job_type        String
+  scope_notes     String?
+  subtotal        Decimal        @default(0) @db.Decimal(10, 2)
+  tax_rate        Decimal        @default(0.05) @db.Decimal(5, 4)
+  tax             Decimal        @default(0) @db.Decimal(10, 2)
+  total           Decimal        @default(0) @db.Decimal(10, 2)
+  auto_follow_up  Boolean        @default(true)
+  follow_up_days  Int            @default(3)
+  follow_up_count Int            @default(0)
+  customer_note   String?
+  code_notes      Json?          @db.JsonB
+  public_token    String?        @unique @default(dbgenerated("encode(gen_random_bytes(16), 'hex')"))
+  delivery_status DeliveryStatus @default(pending)
+  sent_at         DateTime?      @db.Timestamptz()
+  viewed_at       DateTime?      @db.Timestamptz()
+  accepted_at     DateTime?      @db.Timestamptz()
+
+  // E-signature fields
+  signature_data       String?        // PNG data URL from canvas toDataURL()
+  signature_name       String?        // Typed full name
+  signer_ip            String?        // IP address at signing
+  signer_user_agent    String?        // Browser user agent
+  signed_at            DateTime?      @db.Timestamptz()
+
+  expired_at      DateTime?      @db.Timestamptz()
+  next_follow_up  DateTime?      @db.Timestamptz()
+  created_at      DateTime       @default(now()) @db.Timestamptz()
+
+  user       Profile         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  customer   Customer        @relation(fields: [customer_id], references: [id])
+  line_items QuoteLineItem[]
+  messages   QuoteMessage[]
+  activity_events ActivityEvent[]
+  invoices   Invoice[]
+  jobs       Job[]
+
+  @@index([user_id, status], name: "idx_quotes_user_status")
+  @@index([public_token], name: "idx_quotes_public_token")
+  @@index([status, sent_at], name: "idx_quotes_follow_up")
+  @@map("quotes")
+}
+
+// ============================================================
+// QUOTE LINE ITEMS
+// ============================================================
+
+model QuoteLineItem {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quote_id         String           @db.Uuid
+  description      String
+  category         LineItemCategory @default(material)
+  quantity         Decimal          @default(1) @db.Decimal(8, 2)
+  unit             String           @default("ea")
+  rate             Decimal          @default(0) @db.Decimal(10, 2)
+  total            Decimal          @default(0) @db.Decimal(10, 2)
+  is_template_item Boolean          @default(false)
+  sort_order       Int              @default(0)
+
+  quote Quote @relation(fields: [quote_id], references: [id], onDelete: Cascade)
+
+  @@index([quote_id], name: "idx_quote_line_items_quote")
+  @@map("quote_line_items")
+}
+
+// ============================================================
+// QUOTE MESSAGES (communication portal + internal notes)
+// ============================================================
+
+model QuoteMessage {
+  id           String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  quote_id     String           @db.Uuid
+  user_id      String           @db.Uuid
+  direction    MessageDirection
+  channel      MessageChannel
+  message_type MessageType      @default(text)
+  body         String
+  sender_name  String
+  attachments  Json             @default("[]")
+  metadata     Json             @default("{}")
+  is_read      Boolean          @default(false)
+  read_at      DateTime?        @db.Timestamptz()
+  created_at   DateTime         @default(now()) @db.Timestamptz()
+
+  quote Quote   @relation(fields: [quote_id], references: [id], onDelete: Cascade)
+  user  Profile @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([quote_id, created_at], name: "idx_quote_messages_quote")
+  @@index([user_id, is_read], name: "idx_quote_messages_unread")
+  @@map("quote_messages")
+}
+
+// ============================================================
+// INVOICES
+// ============================================================
+
+model Invoice {
+  id             String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id        String        @db.Uuid
+  customer_id    String        @db.Uuid
+  quote_id       String?       @db.Uuid
+  invoice_number String
+  status         InvoiceStatus @default(draft)
+  subtotal       Decimal       @default(0) @db.Decimal(10, 2)
+  tax_rate       Decimal       @default(0.05) @db.Decimal(5, 4)
+  tax            Decimal       @default(0) @db.Decimal(10, 2)
+  total          Decimal       @default(0) @db.Decimal(10, 2)
+  sent_at        DateTime?     @db.Timestamptz()
+  paid_at        DateTime?     @db.Timestamptz()
+  due_date       DateTime?     @db.Date
+  payment_link     String?     // Stripe Payment Link URL (legacy — kept for reference)
+  payment_link_id  String?     // Stripe Payment Link ID (plink_xxx, legacy)
+  public_token     String?     @unique @default(dbgenerated("encode(gen_random_bytes(16), 'hex')"))
+  reminder_count   Int         @default(0)
+  next_reminder    DateTime?   @db.Timestamptz()
+  created_at     DateTime      @default(now()) @db.Timestamptz()
+
+  user       Profile            @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  customer   Customer           @relation(fields: [customer_id], references: [id])
+  quote      Quote?             @relation(fields: [quote_id], references: [id])
+  line_items InvoiceLineItem[]
+  activity_events ActivityEvent[]
+
+  @@index([user_id, status], name: "idx_invoices_user_status")
+  @@index([public_token], name: "idx_invoices_public_token")
+  @@map("invoices")
+}
+
+// ============================================================
+// INVOICE LINE ITEMS
+// ============================================================
+
+model InvoiceLineItem {
+  id          String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  invoice_id  String           @db.Uuid
+  description String
+  category    LineItemCategory @default(material)
+  quantity    Decimal          @default(1) @db.Decimal(8, 2)
+  unit        String           @default("ea")
+  rate        Decimal          @default(0) @db.Decimal(10, 2)
+  total       Decimal          @default(0) @db.Decimal(10, 2)
+  sort_order  Int              @default(0)
+
+  invoice Invoice @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([invoice_id], name: "idx_invoice_line_items_invoice")
+  @@map("invoice_line_items")
+}
+
+// ============================================================
+// ACTIVITY EVENTS (powers the real-time feed)
+// ============================================================
+
+model ActivityEvent {
+  id         String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String            @db.Uuid
+  quote_id   String?           @db.Uuid
+  invoice_id String?           @db.Uuid
+  event_type ActivityEventType
+  metadata   Json              @default("{}")
+  created_at DateTime          @default(now()) @db.Timestamptz()
+
+  user    Profile  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  quote   Quote?   @relation(fields: [quote_id], references: [id], onDelete: SetNull)
+  invoice Invoice? @relation(fields: [invoice_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, created_at(sort: Desc)], name: "idx_activity_events_user")
+  @@map("activity_events")
+}
+
+// ============================================================
+// NOTIFICATIONS (user-facing alerts for customer-initiated events)
+// ============================================================
+
+model Notification {
+  id         String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id    String           @db.Uuid
+  type       NotificationType
+  title      String
+  body       String
+  link_url   String
+  is_read    Boolean          @default(false)
+  read_at    DateTime?        @db.Timestamptz()
+  metadata   Json             @default("{}")
+  created_at DateTime         @default(now()) @db.Timestamptz()
+
+  user Profile @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@index([user_id, is_read, created_at(sort: Desc)], name: "idx_notifications_user_unread")
+  @@map("notifications")
+}
+
+// ============================================================
+// JOBS (scheduling & tracking)
+// ============================================================
+
+model Job {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String    @db.Uuid
+  quote_id        String?   @db.Uuid
+  customer_id     String    @db.Uuid
+  job_type        String
+  status          JobStatus @default(scheduled)
+  scheduled_date  DateTime  @db.Date
+  start_time      String?
+  estimated_hours Decimal   @default(2) @db.Decimal(4, 1)
+  actual_hours    Decimal?  @db.Decimal(4, 1)
+  notes           String?
+  address         String?
+  voice_call_id   String?   @unique @db.Uuid
+  created_at      DateTime  @default(now()) @db.Timestamptz()
+  updated_at      DateTime  @default(now()) @db.Timestamptz()
+
+  user       Profile    @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  quote      Quote?     @relation(fields: [quote_id], references: [id], onDelete: SetNull)
+  customer   Customer   @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  voice_call VoiceCall? @relation(fields: [voice_call_id], references: [id], onDelete: SetNull)
+
+  @@index([user_id, scheduled_date], name: "idx_jobs_user_date")
+  @@index([user_id, status], name: "idx_jobs_user_status")
+  @@map("jobs")
+}
+
+// ============================================================
+// REVIEW REQUESTS (Google Review automation)
+// ============================================================
+
+model ReviewRequest {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String   @db.Uuid
+  customer_id String   @db.Uuid
+  job_id      String?  @db.Uuid
+  invoice_id  String?  @db.Uuid
+  sent_at     DateTime @default(now()) @db.Timestamptz()
+
+  @@unique([user_id, customer_id, job_id])
+  @@index([user_id, sent_at(sort: Desc)], name: "idx_review_requests_user")
+  @@map("review_requests")
+}
+
+// ============================================================
+// VOICE CALLS (AI Receptionist call logs)
+// ============================================================
+
+model VoiceCall {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id          String   @db.Uuid
+  vapi_call_id     String   @unique
+  caller_number    String?
+  duration_seconds Int      @default(0)
+  duration_minutes Decimal  @default(0) @db.Decimal(6, 2)
+  status           String   @default("in-progress")
+  summary          String?
+  transcript       Json?    @db.JsonB
+  recording_url    String?
+  customer_id      String?  @db.Uuid
+  lead_captured    Boolean  @default(false)
+  transferred      Boolean  @default(false)
+  ended_reason     String?
+  appointment_set  Boolean  @default(false)
+  metadata         Json     @default("{}") @db.JsonB
+  created_at       DateTime @default(now()) @db.Timestamptz()
+  ended_at         DateTime? @db.Timestamptz()
+
+  user Profile @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  job  Job?
+
+  @@index([user_id, created_at(sort: Desc)], name: "idx_voice_calls_user")
+  @@map("voice_calls")
+}
