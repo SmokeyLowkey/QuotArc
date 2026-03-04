@@ -37,7 +37,13 @@ export async function GET() {
   })
 
   const [invoices, quotes, jobGroups, jobsCompletedThisMonth, paidForChart] =
-    await Promise.all([invoicesP, quotesP, jobGroupsP, jobsCompletedP, paidForChartP])
+    await Promise.all([invoicesP, quotesP, jobGroupsP, jobsCompletedP, paidForChartP]) as [
+      Awaited<typeof invoicesP>,
+      Awaited<typeof quotesP>,
+      Awaited<typeof jobGroupsP>,
+      Awaited<typeof jobsCompletedP>,
+      Awaited<typeof paidForChartP>,
+    ]
 
   // ── Invoice KPIs ──────────────────────────────────────────
   const paidInvoices = invoices.filter(i => i.status === 'paid')
