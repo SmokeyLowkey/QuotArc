@@ -96,6 +96,8 @@ export async function POST(request: NextRequest) {
     let hours: Record<string, { start: string; end: string }> =
       (metadata?.hours as typeof hours) ?? {}
     let transferNumber: string | null = (metadata?.transfer_number as string) ?? null
+    let instructions: string | null = (metadata?.instructions as string) ?? null
+    const recognizedCustomer = metadata?.recognized_customer as { id: string; name: string; contextSummary: string } | null | undefined
     let userId = (metadata?.user_id as string) ?? ''
 
     // If no metadata, look up by phoneNumberId (fallback for direct calls)
@@ -112,6 +114,7 @@ export async function POST(request: NextRequest) {
           receptionist_services: true,
           receptionist_hours: true,
           receptionist_transfer_number: true,
+          receptionist_instructions: true,
         },
       })
 
@@ -121,6 +124,7 @@ export async function POST(request: NextRequest) {
         services = (profile.receptionist_services as typeof services) ?? []
         hours = (profile.receptionist_hours as typeof hours) ?? {}
         transferNumber = profile.receptionist_transfer_number
+        instructions = profile.receptionist_instructions
 
         const tier = profile.plan_tier as PlanTier
         if (!hasFeature(tier, 'aiReceptionist')) {
@@ -188,7 +192,7 @@ ${servicesList || '(No services listed — ask what they need and offer to have 
 
 HOURS: ${hoursText || 'Contact us for availability'}
 ${transferNumber ? 'Transfer to the owner is available if they request it.' : 'Direct transfer is not available — take a message instead.'}
-
+${instructions ? `\nSPECIAL INSTRUCTIONS (FOLLOW STRICTLY):\n${instructions}\n` : ''}${recognizedCustomer ? `\nCALLER CONTEXT (use to personalize — don't recite it all):\n${recognizedCustomer.contextSummary}\n- Greet by first name. If they have an open quote or upcoming job, ask if that's why they're calling.\n` : ''}
 CALL FLOW:
 1. Listen to their need, give a SHORT answer with pricing if relevant
 2. Ask if they'd like to schedule or leave their info for a callback

@@ -145,6 +145,7 @@ model Profile {
   receptionist_hours         Json      @default("{}")
   receptionist_transfer_number    String?
   receptionist_date_overrides     Json      @default("{}")
+  receptionist_instructions       String?
   default_job_duration            Decimal   @default(2) @db.Decimal(4, 1)
   province               String?   @default("AB")
   created_at             DateTime  @default(now()) @db.Timestamptz()

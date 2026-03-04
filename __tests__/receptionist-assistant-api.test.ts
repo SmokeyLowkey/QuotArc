@@ -22,6 +22,8 @@ const {
     receptionist_hours: { mon: { start: '09:00', end: '17:00' } },
     receptionist_greeting: 'Hello from {company_name}',
     receptionist_transfer_number: '+15551234567',
+    receptionist_date_overrides: {},
+    receptionist_instructions: 'Always mention the $150 consultation fee before tax.',
     receptionist_enabled: true,
     company_name: 'Acme Electric',
   }
@@ -112,6 +114,13 @@ describe('GET /api/voice/assistant', () => {
       receptionist_services: mockProfile.receptionist_services,
       receptionist_enabled: true,
     })
+  })
+
+  it('returns receptionist_instructions in config', async () => {
+    const res = await GET()
+    const data = await res.json()
+
+    expect(data.config.receptionist_instructions).toBe('Always mention the $150 consultation fee before tax.')
   })
 
   it('returns stored messages + current config when history exists in Redis', async () => {

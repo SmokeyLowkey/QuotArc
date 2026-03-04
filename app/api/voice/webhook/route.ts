@@ -13,6 +13,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { redis } from '@/lib/redis'
 import { sendCallSummaryEmail } from '@/lib/email'
+import { recognizeCallerByPhone } from '@/lib/voice/customer-recognition'
 import {
   timeToMinutes,
   minutesToTime,
@@ -106,6 +107,7 @@ async function handleAssistantRequest(message: Record<string, unknown>) {
       receptionist_hours: true,
       receptionist_transfer_number: true,
       receptionist_date_overrides: true,
+      receptionist_instructions: true,
     },
   })
 
@@ -123,8 +125,18 @@ async function handleAssistantRequest(message: Record<string, unknown>) {
     })
   }
 
-  const greeting = (profile.receptionist_greeting ?? 'Hi, thanks for calling {company_name}. How can I help you today?')
-    .replace(/{company_name}/g, profile.company_name)
+  // ── Caller recognition ─────────────────────────────────────────
+  const callerNumber = (call?.customer as Record<string, unknown>)?.number as string | undefined
+  const recognized = await recognizeCallerByPhone(profile.id, callerNumber)
+
+  let greeting: string
+  if (recognized) {
+    const firstName = recognized.name.split(' ')[0]
+    greeting = `Hi ${firstName}, thanks for calling ${profile.company_name}. How can I help you today?`
+  } else {
+    greeting = (profile.receptionist_greeting ?? 'Hi, thanks for calling {company_name}. How can I help you today?')
+      .replace(/{company_name}/g, profile.company_name)
+  }
 
   const services = profile.receptionist_services as { name: string; description: string; priceRange: string }[]
   const hours = profile.receptionist_hours as Record<string, { start: string; end: string }>
@@ -156,7 +168,7 @@ ${servicesList || '(No services listed — ask what they need and offer to have 
 
 HOURS: ${hoursText || 'Contact us for availability'}
 ${profile.receptionist_transfer_number ? 'Transfer to the owner is available if they request it.' : 'Direct transfer is not available — take a message instead.'}
-${closedToday ? `
+${profile.receptionist_instructions ? `\nSPECIAL INSTRUCTIONS (FOLLOW STRICTLY):\n${profile.receptionist_instructions}\n` : ''}${recognized ? `\nCALLER CONTEXT (use to personalize — don't recite it all):\n${recognized.contextSummary}\n- Greet by first name. If they have an open quote or upcoming job, ask if that's why they're calling.\n` : ''}${closedToday ? `
 DAY OFF TODAY (${todayStr}): The owner is unavailable today (one-time exception). Do NOT check availability or schedule appointments. Instead: use capture_lead to save the caller's name and phone number, set notes to "Follow-up needed: called on day off", and let them know someone will call back soon.` : ''}
 
 CALL FLOW:
@@ -201,6 +213,10 @@ ENDING THE CALL:
         services,
         hours,
         transfer_number: profile.receptionist_transfer_number,
+        instructions: profile.receptionist_instructions,
+        recognized_customer: recognized
+          ? { id: recognized.id, name: recognized.name, contextSummary: recognized.contextSummary }
+          : null,
       },
       serverMessages: ['tool-calls', 'end-of-call-report', 'status-update'],
       tools: [
@@ -315,7 +331,8 @@ async function handleToolCalls(message: Record<string, unknown>) {
         break
       }
       case 'capture_lead': {
-        const result = await toolCaptureLead(userId, callId, args)
+        const recognizedCustomer = metadata.recognized_customer as { id: string; name: string } | null | undefined
+        const result = await toolCaptureLead(userId, callId, args, recognizedCustomer)
         results.push({ toolCallId: tc.id, result: JSON.stringify(result) })
         break
       }
@@ -465,6 +482,7 @@ async function toolCaptureLead(
   userId: string | undefined,
   callId: string | undefined,
   args: Record<string, unknown>,
+  recognizedCustomer?: { id: string; name: string } | null,
 ) {
   if (!userId) return { success: false, message: 'Unable to save details right now.' }
 
@@ -475,10 +493,17 @@ async function toolCaptureLead(
   const jobType = args.job_type as string | undefined
   const notes = args.notes as string | undefined
 
-  // Create or find customer; update address/city if newly provided
-  let customer = await prisma.customer.findFirst({
-    where: { user_id: userId, phone },
-  })
+  // Try pre-recognized customer first (matched by caller ID at call start)
+  let customer = recognizedCustomer
+    ? await prisma.customer.findUnique({ where: { id: recognizedCustomer.id } })
+    : null
+
+  // Fall back to phone-based lookup
+  if (!customer && phone) {
+    customer = await prisma.customer.findFirst({
+      where: { user_id: userId, phone },
+    })
+  }
 
   if (!customer) {
     customer = await prisma.customer.create({

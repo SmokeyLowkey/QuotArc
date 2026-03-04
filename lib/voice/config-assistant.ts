@@ -44,6 +44,7 @@ const WRITE_TOOL_NAMES = new Set([
   'update_greeting',
   'update_transfer_number',
   'update_date_overrides',
+  'update_instructions',
 ])
 
 // ─── Config types ──────────────────────────────────────────────
@@ -54,6 +55,7 @@ export interface ReceptionistConfig {
   receptionist_greeting: string | null
   receptionist_transfer_number: string | null
   receptionist_date_overrides: Record<string, 'closed'>
+  receptionist_instructions: string | null
   receptionist_enabled: boolean
 }
 
@@ -70,6 +72,7 @@ function createConfigTools(userId: string) {
           receptionist_greeting: true,
           receptionist_transfer_number: true,
           receptionist_date_overrides: true,
+          receptionist_instructions: true,
         },
       })
       if (!profile) return 'Profile not found'
@@ -82,6 +85,7 @@ function createConfigTools(userId: string) {
         greeting: profile.receptionist_greeting,
         transferNumber: profile.receptionist_transfer_number,
         dateOverrides: Object.entries(overrides).map(([d, s]) => `${d}: ${s}`),
+        instructions: profile.receptionist_instructions,
       })
     },
     {
@@ -270,7 +274,24 @@ function createConfigTools(userId: string) {
     }
   )
 
-  return [getConfig, updateServices, addService, removeService, updateHours, clearHours, updateGreeting, updateTransferNumber, updateDateOverrides]
+  const updateInstructions = tool(
+    async ({ instructions }) => {
+      await prisma.profile.update({
+        where: { id: userId },
+        data: { receptionist_instructions: instructions || null },
+      })
+      return instructions ? `Special instructions updated` : 'Special instructions cleared'
+    },
+    {
+      name: 'update_instructions',
+      description: 'Set or clear special behavioral instructions for the AI receptionist. Use this for directives like "always mention the $150 consultation fee" or "never offer weekend appointments". Pass an empty string to clear.',
+      schema: z.object({
+        instructions: z.string().describe('Free-form instructions for the receptionist, or empty string to clear'),
+      }),
+    }
+  )
+
+  return [getConfig, updateServices, addService, removeService, updateHours, clearHours, updateGreeting, updateTransferNumber, updateDateOverrides, updateInstructions]
 }
 
 // ─── System prompt ─────────────────────────────────────────────
@@ -319,6 +340,7 @@ One-time closed days:
 ${overridesSummary}
 Greeting: ${config?.receptionist_greeting || 'Default'}
 Transfer number: ${config?.receptionist_transfer_number || 'Not set'}
+Special instructions: ${config?.receptionist_instructions || 'None'}
 Today's date: ${new Date().toISOString().split('T')[0]}
 
 When the user asks to make a change, call the right tool immediately — no confirmation needed. After the tool call, briefly confirm what was changed.
@@ -337,6 +359,8 @@ Examples:
 - "What are my current settings?" → get_config
 - "What's my schedule this week?" → answer from the config above (no tool call needed)
 - "How should I price panel upgrades?" → give general business advice
+- "Always mention the $150 consultation fee" → update_instructions
+- "Clear my special instructions" → update_instructions(instructions="")
 
 Be conversational and concise — 2–3 sentences for most replies.`
 }

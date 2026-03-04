@@ -13,6 +13,7 @@ import {
   Loader2,
   ArrowLeft,
   CalendarOff,
+  FileText,
 } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -28,6 +29,7 @@ interface ReceptionistConfig {
   receptionist_greeting: string | null
   receptionist_transfer_number: string | null
   receptionist_date_overrides: Record<string, 'closed'>
+  receptionist_instructions: string | null
   receptionist_enabled: boolean
 }
 
@@ -397,7 +399,8 @@ function ConfigPanel({ config }: { config: ReceptionistConfig | null }) {
     Object.keys(config.receptionist_hours).length > 0 ||
     upcomingOverrides.length > 0 ||
     config.receptionist_greeting ||
-    config.receptionist_transfer_number
+    config.receptionist_transfer_number ||
+    config.receptionist_instructions
   )
 
   return (
@@ -468,6 +471,16 @@ function ConfigPanel({ config }: { config: ReceptionistConfig | null }) {
                 </div>
                 <div className="text-sf-text-secondary text-[11px] leading-relaxed italic">
                   &ldquo;{config!.receptionist_greeting}&rdquo;
+                </div>
+              </div>
+            )}
+            {config!.receptionist_instructions && (
+              <div>
+                <div className="flex items-center gap-1 text-[10px] uppercase tracking-wide text-sf-text-tertiary font-semibold mb-1">
+                  <FileText size={9} /> Instructions
+                </div>
+                <div className="text-sf-text-secondary text-[11px] leading-relaxed">
+                  {config!.receptionist_instructions}
                 </div>
               </div>
             )}

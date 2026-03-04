@@ -42,10 +42,15 @@ const mockRedis = {
   del: vi.fn(async (key: string) => { redisStore.delete(key) }),
 }
 
+const mockRecognize = vi.fn().mockResolvedValue(null)
+
 vi.mock('@/lib/prisma', () => ({ prisma: mockPrisma }))
 vi.mock('@/lib/redis', () => ({ redis: mockRedis }))
 vi.mock('@/lib/email', () => ({
   sendCallSummaryEmail: vi.fn().mockResolvedValue(undefined),
+}))
+vi.mock('@/lib/voice/customer-recognition', () => ({
+  recognizeCallerByPhone: (...args: unknown[]) => mockRecognize(...args),
 }))
 
 // Import after mocks
@@ -70,6 +75,7 @@ function makeRequest(body: unknown, authHeader?: string): NextRequest {
 beforeEach(() => {
   vi.clearAllMocks()
   redisStore.clear()
+  mockRecognize.mockResolvedValue(null)
 })
 
 describe('POST /api/voice/webhook', () => {
@@ -132,6 +138,8 @@ describe('POST /api/voice/webhook', () => {
         receptionist_services: [{ name: 'Panel Upgrade', description: 'Upgrade electrical panel', priceRange: '$1500-$3000' }],
         receptionist_hours: { mon: { start: '08:00', end: '17:00' } },
         receptionist_transfer_number: '+14165550100',
+        receptionist_date_overrides: {},
+        receptionist_instructions: null,
       })
 
       const req = makeRequest({
@@ -154,6 +162,144 @@ describe('POST /api/voice/webhook', () => {
       expect(toolNames).toContain('capture_lead')
       expect(toolNames).toContain('schedule_appointment')
       expect(toolNames).toContain('transfer_call')
+    })
+
+    it('includes special instructions in system prompt and metadata when configured', async () => {
+      mockPrisma.profile.findFirst.mockResolvedValue({
+        id: 'user-1',
+        company_name: 'QuickSpark Electric',
+        receptionist_enabled: true,
+        receptionist_greeting: 'Hi!',
+        receptionist_services: [],
+        receptionist_hours: {},
+        receptionist_transfer_number: null,
+        receptionist_date_overrides: {},
+        receptionist_instructions: 'Always mention the $150 consultation fee before tax.',
+      })
+
+      const req = makeRequest({
+        message: {
+          type: 'assistant-request',
+          call: { phoneNumberId: 'phone-1' },
+        },
+      })
+
+      const res = await POST(req)
+      const data = await res.json()
+
+      const systemMsg = data.assistant.model.messages[0].content
+      expect(systemMsg).toContain('SPECIAL INSTRUCTIONS')
+      expect(systemMsg).toContain('$150 consultation fee')
+      expect(data.assistant.metadata.instructions).toBe('Always mention the $150 consultation fee before tax.')
+    })
+
+    it('omits special instructions section when instructions are null', async () => {
+      mockPrisma.profile.findFirst.mockResolvedValue({
+        id: 'user-1',
+        company_name: 'QuickSpark Electric',
+        receptionist_enabled: true,
+        receptionist_greeting: 'Hi!',
+        receptionist_services: [],
+        receptionist_hours: {},
+        receptionist_transfer_number: null,
+        receptionist_date_overrides: {},
+        receptionist_instructions: null,
+      })
+
+      const req = makeRequest({
+        message: {
+          type: 'assistant-request',
+          call: { phoneNumberId: 'phone-1' },
+        },
+      })
+
+      const res = await POST(req)
+      const data = await res.json()
+
+      const systemMsg = data.assistant.model.messages[0].content
+      expect(systemMsg).not.toContain('SPECIAL INSTRUCTIONS')
+    })
+
+    it('includes caller context and personalized greeting when customer is recognized', async () => {
+      mockPrisma.profile.findFirst.mockResolvedValue({
+        id: 'user-1',
+        company_name: 'QuickSpark Electric',
+        receptionist_enabled: true,
+        receptionist_greeting: 'Hi, thanks for calling {company_name}!',
+        receptionist_services: [],
+        receptionist_hours: {},
+        receptionist_transfer_number: null,
+        receptionist_date_overrides: {},
+        receptionist_instructions: null,
+      })
+      mockRecognize.mockResolvedValue({
+        id: 'cust-1',
+        name: 'Sarah Chen',
+        phone: '+14165551234',
+        address: '123 Main St',
+        city: 'Toronto',
+        contextSummary: 'RETURNING CUSTOMER: Sarah Chen\nRecent quotes: Panel Upgrade (viewed, $4500)',
+      })
+
+      const req = makeRequest({
+        message: {
+          type: 'assistant-request',
+          call: { phoneNumberId: 'phone-1', customer: { number: '+14165551234' } },
+        },
+      })
+
+      const res = await POST(req)
+      const data = await res.json()
+
+      // Personalized greeting
+      expect(data.assistant.firstMessage).toBe('Hi Sarah, thanks for calling QuickSpark Electric. How can I help you today?')
+
+      // System prompt includes caller context
+      const systemMsg = data.assistant.model.messages[0].content
+      expect(systemMsg).toContain('CALLER CONTEXT')
+      expect(systemMsg).toContain('RETURNING CUSTOMER: Sarah Chen')
+      expect(systemMsg).toContain('Panel Upgrade')
+
+      // Metadata includes recognized customer
+      expect(data.assistant.metadata.recognized_customer).toMatchObject({
+        id: 'cust-1',
+        name: 'Sarah Chen',
+      })
+    })
+
+    it('omits caller context when no customer match', async () => {
+      mockPrisma.profile.findFirst.mockResolvedValue({
+        id: 'user-1',
+        company_name: 'QuickSpark Electric',
+        receptionist_enabled: true,
+        receptionist_greeting: 'Hi, thanks for calling {company_name}!',
+        receptionist_services: [],
+        receptionist_hours: {},
+        receptionist_transfer_number: null,
+        receptionist_date_overrides: {},
+        receptionist_instructions: null,
+      })
+      mockRecognize.mockResolvedValue(null)
+
+      const req = makeRequest({
+        message: {
+          type: 'assistant-request',
+          call: { phoneNumberId: 'phone-1', customer: { number: '+14165559999' } },
+        },
+      })
+
+      const res = await POST(req)
+      const data = await res.json()
+
+      // Default greeting (not personalized)
+      expect(data.assistant.firstMessage).toBe('Hi, thanks for calling QuickSpark Electric!')
+
+      // No caller context in prompt
+      const systemMsg = data.assistant.model.messages[0].content
+      expect(systemMsg).not.toContain('CALLER CONTEXT')
+
+      // Metadata has null recognized_customer
+      expect(data.assistant.metadata.recognized_customer).toBeNull()
     })
   })
 

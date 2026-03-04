@@ -90,6 +90,7 @@ async function getReceptionistConfig(userId: string): Promise<ReceptionistConfig
       receptionist_greeting: true,
       receptionist_transfer_number: true,
       receptionist_date_overrides: true,
+      receptionist_instructions: true,
       receptionist_enabled: true,
     },
   })
@@ -99,6 +100,7 @@ async function getReceptionistConfig(userId: string): Promise<ReceptionistConfig
     receptionist_greeting: profile?.receptionist_greeting ?? null,
     receptionist_transfer_number: profile?.receptionist_transfer_number ?? null,
     receptionist_date_overrides: (profile?.receptionist_date_overrides as unknown as Record<string, 'closed'>) ?? {},
+    receptionist_instructions: profile?.receptionist_instructions ?? null,
     receptionist_enabled: profile?.receptionist_enabled ?? false,
   }
 }
