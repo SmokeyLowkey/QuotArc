@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "dev:warm": "next dev & sleep 10 && pnpm warmup",
+    "postinstall": "prisma generate",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
