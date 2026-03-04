@@ -15,33 +15,29 @@ export async function GET() {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
   const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1)
 
-  const [invoices, quotes, jobGroups, jobsCompletedThisMonth, paidForChart] = await Promise.all([
-    // All invoices for KPIs
-    prisma.invoice.findMany({
-      where: { user_id: user.id },
-      select: { status: true, total: true, paid_at: true },
-    }),
-    // All quotes for KPIs
-    prisma.quote.findMany({
-      where: { user_id: user.id },
-      select: { status: true, total: true, sent_at: true },
-    }),
-    // Job counts by status
-    prisma.job.groupBy({
-      by: ['status'],
-      where: { user_id: user.id },
-      _count: { id: true },
-    }),
-    // Jobs marked completed this calendar month
-    prisma.job.count({
-      where: { user_id: user.id, status: 'completed', updated_at: { gte: startOfMonth } },
-    }),
-    // Paid invoices in the last 6 months (for the chart)
-    prisma.invoice.findMany({
-      where: { user_id: user.id, status: 'paid', paid_at: { gte: sixMonthsAgo } },
-      select: { total: true, paid_at: true },
-    }),
-  ])
+  const invoicesP = prisma.invoice.findMany({
+    where: { user_id: user.id },
+    select: { status: true, total: true, paid_at: true },
+  })
+  const quotesP = prisma.quote.findMany({
+    where: { user_id: user.id },
+    select: { status: true, total: true, sent_at: true },
+  })
+  const jobGroupsP = prisma.job.groupBy({
+    by: ['status'],
+    where: { user_id: user.id },
+    _count: { id: true },
+  })
+  const jobsCompletedP = prisma.job.count({
+    where: { user_id: user.id, status: 'completed', updated_at: { gte: startOfMonth } },
+  })
+  const paidForChartP = prisma.invoice.findMany({
+    where: { user_id: user.id, status: 'paid', paid_at: { gte: sixMonthsAgo } },
+    select: { total: true, paid_at: true },
+  })
+
+  const [invoices, quotes, jobGroups, jobsCompletedThisMonth, paidForChart] =
+    await Promise.all([invoicesP, quotesP, jobGroupsP, jobsCompletedP, paidForChartP])
 
   // ── Invoice KPIs ──────────────────────────────────────────
   const paidInvoices = invoices.filter(i => i.status === 'paid')
