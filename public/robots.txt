@@ -1,6 +1,13 @@
 User-agent: *
 Allow: /
 Disallow: /api/
-Disallow: /(app)/
+Disallow: /auth/
+Disallow: /home/
+Disallow: /customers/
+Disallow: /jobs/
+Disallow: /leads/
+Disallow: /quotes/
+Disallow: /invoices/
+Disallow: /settings/
 
-Sitemap: https://QuotArc.app/sitemap.xml
+Sitemap: https://quotarc.com/sitemap.xml
